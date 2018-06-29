@@ -59,6 +59,7 @@ func (q *V3ioPromQuerier) Select(params *storage.SelectParams, oms ...*labels.Ma
 	if params.Func != "" {
 		functions = params.Func
 	}
+	fmt.Println("\nSelect:",name, functions, params.Step, filter)
 	set, err := q.q.Select(name, functions, params.Step, filter)
 	return &V3ioPromSeriesSet{s: set}, err
 }
@@ -100,10 +101,19 @@ type V3ioPromSeriesSet struct {
 	s querier.SeriesSet
 }
 
-func (s *V3ioPromSeriesSet) Next() bool { return s.s.Next() }
-func (s *V3ioPromSeriesSet) Err() error { return s.s.Err() }
+func (s *V3ioPromSeriesSet) Next() bool {
+	n := s.s.Next()
+	fmt.Println("Next:",n)
+	return n
+}
+func (s *V3ioPromSeriesSet) Err() error {
+	e := s.s.Err()
+	fmt.Println("Err:",e)
+	return e
+}
 func (s *V3ioPromSeriesSet) At() storage.Series {
 	series := s.s.At()
+	fmt.Println("At:", series.Labels())
 	return &V3ioPromSeries{series}
 }
 
@@ -135,16 +145,32 @@ type V3ioPromSeriesIterator struct {
 // Seek advances the iterator forward to the given timestamp.
 // If there's no value exactly at t, it advances to the first value
 // after t.
-func (s *V3ioPromSeriesIterator) Seek(t int64) bool { return s.s.Seek(t) }
+func (s *V3ioPromSeriesIterator) Seek(t int64) bool {
+	n:= s.s.Seek(t)
+	fmt.Println("SeekIt:",n)
+	return n
+}
 
 // Next advances the iterator by one.
-func (s *V3ioPromSeriesIterator) Next() bool { return s.s.Next() }
+func (s *V3ioPromSeriesIterator) Next() bool {
+	n:= s.s.Next()
+	fmt.Println("NextIt:",n)
+	return n
+}
 
 // At returns the current timestamp/value pair.
-func (s *V3ioPromSeriesIterator) At() (t int64, v float64) { return s.s.At() }
+func (s *V3ioPromSeriesIterator) At() (t int64, v float64) {
+	t, v = s.s.At()
+	fmt.Println("AtIt:",t,v)
+	return t,v
+}
 
 // Err returns the current error.
-func (s *V3ioPromSeriesIterator) Err() error { return s.s.Err() }
+func (s *V3ioPromSeriesIterator) Err() error {
+	e := s.s.Err()
+	fmt.Println("ErrIt:",e)
+	return e
+}
 
 type v3ioAppender struct {
 	metricsCache *appender.MetricsCache
