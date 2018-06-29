@@ -45,6 +45,7 @@ func (a *V3ioPromAdapter) Close() error {
 
 func (a *V3ioPromAdapter) Querier(_ context.Context, mint, maxt int64) (storage.Querier, error) {
 	v3ioQuerier, err := a.db.Querier(nil, mint, maxt)
+	fmt.Println("\nQuery:",mint, maxt)
 	querier := V3ioPromQuerier{q: v3ioQuerier}
 	return &querier, err
 }
@@ -59,7 +60,7 @@ func (q *V3ioPromQuerier) Select(params *storage.SelectParams, oms ...*labels.Ma
 	if params.Func != "" {
 		functions = params.Func
 	}
-	fmt.Println("\nSelect:",name, functions, params.Step, filter)
+	fmt.Println("\nSelect (name,f,step,flt):",name, functions, params.Step, filter)
 	set, err := q.q.Select(name, functions, params.Step, filter)
 	return &V3ioPromSeriesSet{s: set}, err
 }
@@ -103,7 +104,11 @@ type V3ioPromSeriesSet struct {
 
 func (s *V3ioPromSeriesSet) Next() bool {
 	n := s.s.Next()
-	fmt.Println("Next:",n)
+	if n {
+		fmt.Printf("N")
+	} else {
+		fmt.Printf("n")
+	}
 	return n
 }
 func (s *V3ioPromSeriesSet) Err() error {
@@ -113,7 +118,7 @@ func (s *V3ioPromSeriesSet) Err() error {
 }
 func (s *V3ioPromSeriesSet) At() storage.Series {
 	series := s.s.At()
-	fmt.Println("At:", series.Labels())
+	fmt.Println("\nAt:", series.Labels())
 	return &V3ioPromSeries{series}
 }
 
@@ -147,21 +152,25 @@ type V3ioPromSeriesIterator struct {
 // after t.
 func (s *V3ioPromSeriesIterator) Seek(t int64) bool {
 	n:= s.s.Seek(t)
-	fmt.Println("SeekIt:",n)
+	fmt.Printf(" SeekIt:%d,%v ",t, n)
 	return n
 }
 
 // Next advances the iterator by one.
 func (s *V3ioPromSeriesIterator) Next() bool {
 	n:= s.s.Next()
-	fmt.Println("NextIt:",n)
+	if n {
+		fmt.Printf("Ni")
+	} else {
+		fmt.Printf("ni")
+	}
 	return n
 }
 
 // At returns the current timestamp/value pair.
 func (s *V3ioPromSeriesIterator) At() (t int64, v float64) {
 	t, v = s.s.At()
-	fmt.Println("AtIt:",t,v)
+	fmt.Printf("TS(%d,%f) ",t,v)
 	return t,v
 }
 
