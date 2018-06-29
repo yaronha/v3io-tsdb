@@ -83,7 +83,7 @@ func match2filter(oms []*labels.Matcher) (string, string, string) {
 	for _, matcher := range oms {
 		if matcher.Name == "Aggregator" {
 			aggregator = matcher.Value
-		} else if matcher.Name == "Aggregator" && matcher.Type == labels.MatchEqual {
+		} else if matcher.Name == "__name__" && matcher.Type == labels.MatchEqual {
 			name = matcher.Value
 		} else {
 			switch matcher.Type {
@@ -105,9 +105,9 @@ type V3ioPromSeriesSet struct {
 func (s *V3ioPromSeriesSet) Next() bool {
 	n := s.s.Next()
 	if n {
-		fmt.Printf("N")
+		fmt.Printf(" NN ")
 	} else {
-		fmt.Printf("n")
+		fmt.Printf(" nn ")
 	}
 	return n
 }
@@ -160,9 +160,9 @@ func (s *V3ioPromSeriesIterator) Seek(t int64) bool {
 func (s *V3ioPromSeriesIterator) Next() bool {
 	n:= s.s.Next()
 	if n {
-		fmt.Printf("Ni")
+		fmt.Printf(" NNi ")
 	} else {
-		fmt.Printf("ni")
+		fmt.Printf(" nni ")
 	}
 	return n
 }
