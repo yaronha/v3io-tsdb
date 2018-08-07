@@ -190,14 +190,24 @@ func (cs *chunkStore) ProcessGetResp(mc *MetricsCache, metric *MetricState, resp
 }
 
 // Append data to the right chunk and table based on the time and state
-func (cs *chunkStore) Append(t int64, v interface{}) {
+func (cs *chunkStore) Append(t int64, v interface{}) bool {
 
-	cs.pending = append(cs.pending, pendingData{t: t, v: v})
 	// if the new time is older than previous times, sort the list
-	if len(cs.pending) > 1 && cs.pending[len(cs.pending)-2].t < t {
-		sort.Sort(cs.pending)
+	if len(cs.pending) > 1 && cs.pending[len(cs.pending)-2].t <= t {
+		i := sort.Search(len(cs.pending), func(i int) bool { return cs.pending[i].t >= t })
+
+		// if the timestamp is in the pending list, drop and return true (duplicate)
+		if i == len(cs.pending) || cs.pending[i].t == t {
+			return true
+		}
+		cs.pending = append(cs.pending, pendingData{})
+		copy(cs.pending[i+1:], cs.pending[i:])
+		cs.pending[i] = pendingData{t: t, v: v}
+	} else {
+		cs.pending = append(cs.pending, pendingData{t: t, v: v})
 	}
 
+	return false
 }
 
 // return current, previous, or create new  chunk based on sample time

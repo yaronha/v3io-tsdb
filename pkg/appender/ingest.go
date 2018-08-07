@@ -32,14 +32,14 @@ import (
 func (mc *MetricsCache) start() error {
 
 	mc.nameUpdateRespLoop()
-	mc.metricsUpdateLoop(0)
-	mc.metricFeed(0)
+	mc.metricsUpdateLoop()
+	mc.metricFeed()
 
 	return nil
 }
 
 // Reads data from append queue, push into per metric queues, and manage ingestion states
-func (mc *MetricsCache) metricFeed(index int) {
+func (mc *MetricsCache) metricFeed() {
 
 	go func() {
 		inFlight := 0
@@ -85,23 +85,28 @@ func (mc *MetricsCache) metricFeed(index int) {
 						metric.Lock()
 
 						if !metric.hasError() && metric.isTimeInvalid(app.t) {
-							metric.store.Append(app.t, app.v)
-							numPushed++
-							dataQueued += metric.store.samplesQueueLength()
+							duplicate := metric.store.Append(app.t, app.v)
+							if duplicate {
+								// add warning and drop sample in case of duplicate time in the pending queue
+								mc.logger.WarnWith("duplicate timestamp during ingest", "t", app.t, "metric", metric.Lset)
+							} else {
+								numPushed++
+								dataQueued += metric.store.samplesQueueLength()
 
-							// if there are no in flight requests, add the metric to the queue and update state
-							if metric.isReady() || metric.getState() == storeStateInit {
+								// if there are no in flight requests, add the metric to the queue and update state
+								if metric.isReady() || metric.getState() == storeStateInit {
 
-								if metric.getState() == storeStateInit {
-									metric.setState(storeStatePreGet)
-								}
-								if metric.isReady() {
-									metric.setState(storeStateUpdate)
-								}
+									if metric.getState() == storeStateInit {
+										metric.setState(storeStatePreGet)
+									}
+									if metric.isReady() {
+										metric.setState(storeStateUpdate)
+									}
 
-								length := mc.metricQueue.Push(metric)
-								if length < 2*mc.cfg.Workers {
-									newMetrics++
+									length := mc.metricQueue.Push(metric)
+									if length < 2*mc.cfg.Workers {
+										newMetrics++
+									}
 								}
 							}
 						}
@@ -123,11 +128,11 @@ func (mc *MetricsCache) metricFeed(index int) {
 				}
 
 				// If we have too much work, stall the queue for some time
-				if numPushed > maxSamplesBatchSize/2 && dataQueued/numPushed > 64 {
+				if numPushed > mc.cfg.BatchSize/2 && dataQueued/numPushed > mc.cfg.BatchSize {
 					switch {
-					case dataQueued/numPushed <= 96:
+					case dataQueued/numPushed <= 2*mc.cfg.BatchSize:
 						time.Sleep(queueStallTime)
-					case dataQueued/numPushed > 96 && dataQueued/numPushed < 200:
+					case dataQueued/numPushed > 2*mc.cfg.BatchSize && dataQueued/numPushed < 4*mc.cfg.BatchSize:
 						time.Sleep(4 * queueStallTime)
 					default:
 						time.Sleep(10 * queueStallTime)
@@ -139,7 +144,7 @@ func (mc *MetricsCache) metricFeed(index int) {
 }
 
 // async loop which accept new metric updates or responses from previous updates and make new storage requests
-func (mc *MetricsCache) metricsUpdateLoop(index int) {
+func (mc *MetricsCache) metricsUpdateLoop() {
 
 	go func() {
 		counter := 0
