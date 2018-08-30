@@ -47,8 +47,12 @@ type chunkStore struct {
 	lastTid  int64
 	chunks   [2]*attrAppender
 
-	aggrList      *aggregate.AggregatorList
-	pending       pendingList
+	aggrList         *aggregate.AggregatorList
+	pending          pendingList
+	pendingUnordered bool
+	pendingSentPtr   int
+	pendingMax       int64
+
 	maxTime       int64
 	initMaxTime   int64 // max time read from DB metric before first append
 	delRawSamples bool  // TODO: for metrics w aggregates only
@@ -97,18 +101,6 @@ func (a *attrAppender) isAhead(t int64) bool {
 func (a *attrAppender) appendAttr(t int64, v interface{}) {
 	a.appender.Append(t, v.(float64))
 }
-
-// struct/list storing uncommitted samples, with time sorting support
-type pendingData struct {
-	t int64
-	v interface{}
-}
-
-type pendingList []pendingData
-
-func (l pendingList) Len() int           { return len(l) }
-func (l pendingList) Less(i, j int) bool { return l[i].t < l[j].t }
-func (l pendingList) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
 
 // Read (Async) the current chunk state and data from the storage, used in the first chunk access
 func (cs *chunkStore) GetChunksState(mc *MetricsCache, metric *MetricState) (bool, error) {
@@ -175,12 +167,10 @@ func (cs *chunkStore) ProcessGetResp(mc *MetricsCache, metric *MetricState, resp
 	}
 	mc.logger.DebugWith("Got Item", "name", metric.name, "key", metric.key, "maxt", maxTime)
 
-	if !mc.cfg.OverrideOld {
-		cs.maxTime = maxTime
-		cs.initMaxTime = maxTime
-	}
+	cs.maxTime = maxTime
+	cs.initMaxTime = maxTime
 
-	if cs.chunks[0].inRange(maxTime) && !mc.cfg.OverrideOld {
+	if cs.chunks[0].inRange(maxTime) {
 		cs.chunks[0].state |= chunkStateMerge
 	}
 
@@ -287,8 +277,9 @@ func (cs *chunkStore) WriteChunks(mc *MetricsCache, metric *MetricState) (bool, 
 	for pendingSampleIndex < len(cs.pending) && pendingSamplesCount < mc.cfg.BatchSize && partition.InRange(cs.pending[pendingSampleIndex].t) {
 		sampleTime := cs.pending[pendingSampleIndex].t
 
-		if sampleTime <= cs.initMaxTime && !mc.cfg.OverrideOld {
-			mc.logger.DebugWith("Time is less than init max time", "T", sampleTime, "InitMaxTime", cs.initMaxTime)
+		if sampleTime <= cs.initMaxTime || sampleTime == cs.maxTime {
+			mc.logger.WarnWith("Time is less than init max time or duplicate",
+				"T", sampleTime, "InitMaxTime", cs.initMaxTime, "MaxTime", cs.maxTime, "metric", metric.Lset)
 			pendingSampleIndex++
 			continue
 		}
@@ -312,7 +303,7 @@ func (cs *chunkStore) WriteChunks(mc *MetricsCache, metric *MetricState) (bool, 
 		cs.aggrList.Aggregate(sampleTime, cs.pending[pendingSampleIndex].v)
 
 		// add value to compressed raw value chunk
-		activeChunk.appendAttr(sampleTime, cs.pending[pendingSampleIndex].v.(float64))
+		activeChunk.appendAttr(sampleTime, cs.pending[pendingSampleIndex].v)
 
 		// if the last item or last item in the same partition add expressions and break
 		if (pendingSampleIndex == len(cs.pending)-1) || pendingSamplesCount == mc.cfg.BatchSize-1 || !partition.InRange(cs.pending[pendingSampleIndex+1].t) {
