@@ -21,10 +21,12 @@ such restriction.
 package querier
 
 import (
+	"strings"
+
 	"github.com/v3io/v3io-tsdb/pkg/aggregate"
 	"github.com/v3io/v3io-tsdb/pkg/chunkenc"
+	"github.com/v3io/v3io-tsdb/pkg/config"
 	"github.com/v3io/v3io-tsdb/pkg/utils"
-	"strings"
 )
 
 // Create a new series from chunks
@@ -47,7 +49,7 @@ func (s *V3ioSeries) Labels() utils.Labels { return s.lset }
 // Get the unique series key for sorting
 func (s *V3ioSeries) GetKey() uint64 {
 	if s.hash == 0 {
-		s.hash = s.lset.Hash()
+		s.hash = s.lset.HashWithMetricName()
 	}
 	return s.hash
 }
@@ -85,7 +87,7 @@ func initLabels(set *V3ioSeriesSet) utils.Labels {
 func (s *V3ioSeries) initSeriesIter() {
 
 	maxt := s.set.maxt
-	maxTime := s.set.iter.GetField("_maxtime")
+	maxTime := s.set.iter.GetField(config.MaxTimeAttrName)
 	if maxTime != nil && int64(maxTime.(int)) < maxt {
 		maxt = int64(maxTime.(int))
 	}

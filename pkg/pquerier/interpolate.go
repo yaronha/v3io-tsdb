@@ -26,19 +26,20 @@ import (
 	"strings"
 )
 
-type InterpolateType uint8
+type InterpolationType uint8
 
 const (
-	interpolateNone InterpolateType = 0
-	interpolateNaN  InterpolateType = 1
-	interpolatePrev InterpolateType = 2
-	interpolateNext InterpolateType = 3
-	interpolateLin  InterpolateType = 4
+	interpolateNone      InterpolationType = 0
+	interpolateNaN       InterpolationType = 1
+	interpolatePrev      InterpolationType = 2
+	interpolateNext      InterpolationType = 3
+	interpolateLinear    InterpolationType = 4
+	defaultInterpolation InterpolationType = interpolateNext
 )
 
 type InterpolationFunction func(tprev, tnext, tseek int64, vprev, vnext float64) (int64, float64)
 
-func StrToInterpolateType(str string) (InterpolateType, error) {
+func StrToInterpolateType(str string) (InterpolationType, error) {
 	switch strings.ToLower(str) {
 	case "none", "":
 		return interpolateNone, nil
@@ -49,13 +50,13 @@ func StrToInterpolateType(str string) (InterpolateType, error) {
 	case "next":
 		return interpolateNext, nil
 	case "lin", "linear":
-		return interpolateLin, nil
+		return interpolateLinear, nil
 	}
 	return 0, fmt.Errorf("unknown/unsupported interpulation function %s", str)
 }
 
 // return line interpolation function, estimate seek value based on previous and next points
-func GetInterpolateFunc(alg InterpolateType) InterpolationFunction {
+func GetInterpolateFunc(alg InterpolationType) InterpolationFunction {
 	switch alg {
 	case interpolateNaN:
 		return projectNaN
@@ -63,8 +64,8 @@ func GetInterpolateFunc(alg InterpolateType) InterpolationFunction {
 		return projectPrev
 	case interpolateNext:
 		return projectNext
-	case interpolateLin:
-		return projectLin
+	case interpolateLinear:
+		return projectLinear
 	default:
 		return projectNone
 	}
@@ -91,7 +92,7 @@ func projectNext(tprev, tnext, tseek int64, vprev, vnext float64) (int64, float6
 }
 
 // linear estimator (smooth graph)
-func projectLin(tprev, tnext, tseek int64, vprev, vnext float64) (int64, float64) {
+func projectLinear(tprev, tnext, tseek int64, vprev, vnext float64) (int64, float64) {
 	if math.IsNaN(vprev) || math.IsNaN(vnext) {
 		return tseek, math.NaN()
 	}

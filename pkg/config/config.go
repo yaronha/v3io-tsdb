@@ -21,12 +21,15 @@ such restriction.
 package config
 
 import (
-	"github.com/ghodss/yaml"
-	"github.com/pkg/errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/ghodss/yaml"
+	"github.com/imdario/mergo"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -53,12 +56,57 @@ const (
 	DefaultSampleRetentionTime    = 0
 	DefaultLogLevel               = "info"
 	DefaultVerboseLevel           = "debug"
+
+	// KV attribute names
+	MaxTimeAttrName     = "_maxtime"
+	LabelSetAttrName    = "_lset"
+	EncodingAttrName    = "_enc"
+	OutOfOrderAttrName  = "_ooo"
+	MetricNameAttrName  = "_name"
+	ObjectNameAttrName  = "__name"
+	ChunkAttrPrefix     = "_v"
+	AggregateAttrPrefix = "_v_"
+
+	PrometheusMetricNameAttribute = "__name__"
+
+	NamesDirectory = "names"
 )
 
+type BuildInfo struct {
+	BuildTime    string `json:"buildTime,omitempty"`
+	Os           string `json:"os,omitempty"`
+	Architecture string `json:"architecture,omitempty"`
+	Version      string `json:"version,omitempty"`
+	CommitHash   string `json:"commitHash,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+}
+
+func (bi *BuildInfo) String() string {
+	return fmt.Sprintf("Build time: %s\nOS: %s\nArchitecture: %s\nVersion: %s\nCommit Hash: %s\nBranch: %s\n",
+		bi.BuildTime,
+		bi.Os,
+		bi.Architecture,
+		bi.Version,
+		bi.CommitHash,
+		bi.Branch)
+}
+
 var (
+	// Note, following variables set by make
+	buildTime, osys, architecture, version, commitHash, branch string
+
 	instance *V3ioConfig
 	once     sync.Once
 	failure  error
+
+	BuildMetadta = &BuildInfo{
+		BuildTime:    buildTime,
+		Os:           osys,
+		Architecture: architecture,
+		Version:      version,
+		CommitHash:   commitHash,
+		Branch:       branch,
+	}
 )
 
 func Error() error {
@@ -74,6 +122,8 @@ type V3ioConfig struct {
 	TablePath      string `json:"tablePath"`
 	Username       string `json:"username,omitempty"`
 	Password       string `json:"password,omitempty"`
+
+	HttpTimeout string `json:"httpTimeout,omitempty"`
 
 	// Disabled = true disables the V3IO TSDB configuration in Prometheus and
 	// enables the internal Prometheus TSDB instead
@@ -108,6 +158,8 @@ type V3ioConfig struct {
 	// Don't aggregate from raw chunks, for use when working as a Prometheus
 	// TSDB library
 	DisableClientAggr bool `json:"disableClientAggr,omitempty"`
+	// Build Info
+	BuildInfo *BuildInfo `json:"buildInfo,omitempty"`
 }
 
 type MetricsReporterConfig struct {
@@ -213,6 +265,31 @@ func GetOrLoadFromStruct(cfg *V3ioConfig) (*V3ioConfig, error) {
 	return instance, nil
 }
 
+// Update the defaults when using an existing configuration structure (custom configuration)
+func WithDefaults(cfg *V3ioConfig) *V3ioConfig {
+	initDefaults(cfg)
+	return cfg
+}
+
+// Create new configuration structure instance based on given instance.
+// All matching attributes within result structure will be overwritten with values of newCfg
+func (currentCfg *V3ioConfig) Merge(newCfg *V3ioConfig) (*V3ioConfig, error) {
+	resultCfg, err := currentCfg.merge(newCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return resultCfg, nil
+}
+
+func (*V3ioConfig) merge(cfg *V3ioConfig) (*V3ioConfig, error) {
+	mergedCfg := V3ioConfig{}
+	if err := mergo.Merge(&mergedCfg, cfg, mergo.WithOverride); err != nil {
+		return nil, errors.Wrap(err, "Unable to merge configurations.")
+	}
+	return &mergedCfg, nil
+}
+
 func loadConfig(path string) (*V3ioConfig, error) {
 
 	var resolvedPath string
@@ -252,7 +329,9 @@ func loadConfig(path string) (*V3ioConfig, error) {
 }
 
 func loadFromData(data []byte) (*V3ioConfig, error) {
-	cfg := V3ioConfig{}
+	cfg := V3ioConfig{
+		BuildInfo: BuildMetadta,
+	}
 	err := yaml.Unmarshal(data, &cfg)
 
 	if err != nil {
@@ -265,6 +344,10 @@ func loadFromData(data []byte) (*V3ioConfig, error) {
 }
 
 func initDefaults(cfg *V3ioConfig) {
+	if cfg.BuildInfo == nil {
+		cfg.BuildInfo = BuildMetadta
+	}
+
 	// Initialize the default number of workers
 	if cfg.Workers == 0 {
 		cfg.Workers = defaultNumberOfIngestWorkers

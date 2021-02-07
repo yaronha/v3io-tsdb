@@ -21,9 +21,10 @@ such restriction.
 package tsdbctl
 
 import (
-	"os"
-
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/nuclio/logger"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -31,7 +32,6 @@ import (
 	"github.com/v3io/v3io-tsdb/internal/pkg/performance"
 	"github.com/v3io/v3io-tsdb/pkg/config"
 	"github.com/v3io/v3io-tsdb/pkg/tsdb"
-	"strings"
 )
 
 type RootCommandeer struct {
@@ -47,10 +47,13 @@ type RootCommandeer struct {
 	username    string
 	password    string
 	Reporter    *performance.MetricReporter
+	BuildInfo   *config.BuildInfo
 }
 
 func NewRootCommandeer() *RootCommandeer {
-	commandeer := &RootCommandeer{}
+	commandeer := &RootCommandeer{
+		BuildInfo: config.BuildMetadta,
+	}
 
 	cmd := &cobra.Command{
 		Use:          "tsdbctl [command] [arguments] [flags]",
@@ -89,6 +92,7 @@ func NewRootCommandeer() *RootCommandeer {
 		newInfoCommandeer(commandeer).cmd,
 		newDeleteCommandeer(commandeer).cmd,
 		newCheckCommandeer(commandeer).cmd,
+		newVersionCommandeer(commandeer).cmd,
 	)
 
 	commandeer.cmd = cmd
@@ -186,8 +190,14 @@ func (rc *RootCommandeer) populateConfig(cfg *config.V3ioConfig) error {
 	if rc.dbPath != "" {
 		cfg.TablePath = rc.dbPath
 	}
-	if cfg.WebApiEndpoint == "" || cfg.Container == "" || cfg.TablePath == "" {
-		return fmt.Errorf("Not all required configuration information was provided. The endpoint of the web-gateway service, related username and password authentication credentials, the name of the TSDB parent data container, and the path to the TSDB table within the container, must be defined as part of the CLI command or in a configuration file.")
+	if cfg.WebApiEndpoint == "" {
+		return errors.New("web API endpoint must be set")
+	}
+	if cfg.Container == "" {
+		return errors.New("container must be set")
+	}
+	if cfg.TablePath == "" {
+		return errors.New("table path must be set")
 	}
 	if rc.logLevel != "" {
 		cfg.LogLevel = rc.logLevel

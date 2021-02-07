@@ -23,12 +23,16 @@ package utils
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
+
 	"github.com/nuclio/logger"
 	"github.com/nuclio/zap"
 	"github.com/pkg/errors"
 	"github.com/v3io/v3io-go-http"
-	"time"
+	"github.com/v3io/v3io-tsdb/pkg/config"
 )
+
+const defaultHttpTimeout = 10 * time.Second
 
 func NewLogger(level string) (logger.Logger, error) {
 	var logLevel nucliozap.Level
@@ -52,21 +56,33 @@ func NewLogger(level string) (logger.Logger, error) {
 	return log, nil
 }
 
-func CreateContainer(logger logger.Logger, addr, cont, username, password string, workers int) (*v3io.Container, error) {
+func CreateContainer(logger logger.Logger, cfg *config.V3ioConfig) (*v3io.Container, error) {
 	// Create context
-	context, err := v3io.NewContext(logger, addr, workers)
+	context, err := v3io.NewContext(logger, cfg.WebApiEndpoint, cfg.Workers)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create a V3IO TSDB client.")
 	}
 
+	if cfg.HttpTimeout == "" {
+		context.Sync.Timeout = defaultHttpTimeout
+	} else {
+		timeout, err := time.ParseDuration(cfg.HttpTimeout)
+		if err != nil {
+			logger.Warn("Failed to parse httpTimeout '%s'. Defaulting to %d millis.", cfg.HttpTimeout, defaultHttpTimeout/time.Millisecond)
+			context.Sync.Timeout = defaultHttpTimeout
+		} else {
+			context.Sync.Timeout = timeout
+		}
+	}
+
 	// Create session
-	session, err := context.NewSession(username, password, "v3test")
+	session, err := context.NewSession(cfg.Username, cfg.Password, "v3test")
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create a session.")
 	}
 
 	// Create the container
-	container, err := session.NewContainer(cont)
+	container, err := session.NewContainer(cfg.Container)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create a container.")
 	}
@@ -86,7 +102,7 @@ func AsInt64Array(val []byte) []uint64 {
 }
 
 func DeleteTable(logger logger.Logger, container *v3io.Container, path, filter string, workers int) error {
-	input := v3io.GetItemsInput{Path: path, AttributeNames: []string{"__name"}, Filter: filter}
+	input := v3io.GetItemsInput{Path: path, AttributeNames: []string{config.ObjectNameAttrName}, Filter: filter}
 	iter, err := NewAsyncItemsCursor(container, &input, workers, []string{}, logger)
 	if err != nil {
 		return err
@@ -99,7 +115,7 @@ func DeleteTable(logger logger.Logger, container *v3io.Container, path, filter s
 
 	i := 0
 	for iter.Next() {
-		name := iter.GetField("__name").(string)
+		name := iter.GetField(config.ObjectNameAttrName).(string)
 		req, err := container.DeleteObject(&v3io.DeleteObjectInput{Path: path + "/" + name}, nil, responseChan)
 		if err != nil {
 			commChan <- i

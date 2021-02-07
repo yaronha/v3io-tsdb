@@ -23,16 +23,17 @@ package partmgr
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"path"
+	"strconv"
+	"sync"
+
 	"github.com/pkg/errors"
 	"github.com/v3io/v3io-go-http"
 	"github.com/v3io/v3io-tsdb/internal/pkg/performance"
 	"github.com/v3io/v3io-tsdb/pkg/aggregate"
 	"github.com/v3io/v3io-tsdb/pkg/config"
 	"github.com/v3io/v3io-tsdb/pkg/utils"
-	"math"
-	"path"
-	"strconv"
-	"sync"
 )
 
 // Create a new partition manager
@@ -71,7 +72,7 @@ func NewDBPartition(pmgr *PartitionManager, startTime int64, path string) (*DBPa
 		rollupTime:        rollupTime,
 	}
 
-	aggrType, err := aggregate.AggrsFromString(pmgr.schemaConfig.PartitionSchemaInfo.Aggregates)
+	aggrType, _, err := aggregate.AggregatesFromStringListWithCount(pmgr.schemaConfig.PartitionSchemaInfo.Aggregates)
 	if err != nil {
 		return nil, err
 	}
@@ -279,10 +280,11 @@ func (p *PartitionManager) updatePartitionsFromSchema(schema *config.Schema) err
 	return nil
 }
 
-func (p *PartitionManager) PartsForRange(mint, maxt int64) []*DBPartition {
+//if inclusive is true than partial partitions (not fully in range) will be retireved as well
+func (p *PartitionManager) PartsForRange(mint, maxt int64, inclusive bool) []*DBPartition {
 	var parts []*DBPartition
 	for _, part := range p.partitions {
-		if part.InRange(mint) || part.InRange(maxt) || (mint < part.GetStartTime() && maxt > part.GetEndTime()) {
+		if (mint < part.GetStartTime() && maxt > part.GetEndTime()) || (inclusive && (part.InRange(mint) || part.InRange(maxt))) {
 			parts = append(parts, part)
 		}
 	}
@@ -429,7 +431,12 @@ func (p *DBPartition) Range2Attrs(col string, mint, maxt int64) ([]string, int64
 		strList = append(strList, p.ChunkID2Attr(col, id))
 	}
 
-	firstAttrTime := p.startTime + ((mint-p.startTime)/p.chunkInterval)*p.chunkInterval
+	var firstAttrTime int64
+	if mint < p.startTime {
+		firstAttrTime = p.startTime
+	} else {
+		firstAttrTime = p.startTime + ((mint-p.startTime)/p.chunkInterval)*p.chunkInterval
+	}
 	return strList, firstAttrTime
 }
 

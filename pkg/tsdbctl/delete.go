@@ -23,13 +23,14 @@ package tsdbctl
 import (
 	"bufio"
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/v3io/v3io-tsdb/pkg/config"
 	"github.com/v3io/v3io-tsdb/pkg/utils"
-	"os"
-	"strings"
-	"time"
 )
 
 type delCommandeer struct {
@@ -72,7 +73,7 @@ Notes:
 
 	cmd.Flags().BoolVarP(&commandeer.deleteAll, "all", "a", false,
 		"Delete the TSDB table, including its configuration and all content.")
-	cmd.Flags().BoolVarP(&commandeer.ignoreErrors, "ignore-errors", "i", false,
+	cmd.Flags().BoolVarP(&commandeer.ignoreErrors, "ignore-errors", "i", true,
 		"Ignore errors - continue deleting even if some steps fail.")
 	cmd.Flags().BoolVarP(&commandeer.force, "force", "f", false,
 		"Forceful deletion - don't display a delete-verification prompt.")
@@ -111,9 +112,13 @@ func (dc *delCommandeer) delete() error {
 		}
 	}
 
+	partialMsg := "entire"
+	if !dc.deleteAll {
+		partialMsg = "part of"
+	}
 	if !dc.force {
 		confirmedByUser, err := getConfirmation(
-			fmt.Sprintf("You are about to delete TSDB table '%s' in container '%s'. Are you sure?", dc.rootCommandeer.v3iocfg.TablePath, dc.rootCommandeer.v3iocfg.Container))
+			fmt.Sprintf("You are about to delete %s TSDB table '%s' in container '%s'. Are you sure?", partialMsg, dc.rootCommandeer.v3iocfg.TablePath, dc.rootCommandeer.v3iocfg.Container))
 		if err != nil {
 			return err
 		}
@@ -125,9 +130,9 @@ func (dc *delCommandeer) delete() error {
 
 	err = dc.rootCommandeer.adapter.DeleteDB(dc.deleteAll, dc.ignoreErrors, from, to)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to delete TSDB table '%s' in container '%s'.", dc.rootCommandeer.v3iocfg.TablePath, dc.rootCommandeer.v3iocfg.Container)
+		return errors.Wrapf(err, "Failed to delete %s TSDB table '%s' in container '%s'.", partialMsg, dc.rootCommandeer.v3iocfg.TablePath, dc.rootCommandeer.v3iocfg.Container)
 	}
-	fmt.Printf("Successfully deleted TSDB table '%s' from container '%s'.\n", dc.rootCommandeer.v3iocfg.TablePath, dc.rootCommandeer.v3iocfg.Container)
+	fmt.Printf("Successfully deleted %s TSDB table '%s' from container '%s'.\n", partialMsg, dc.rootCommandeer.v3iocfg.TablePath, dc.rootCommandeer.v3iocfg.Container)
 
 	return nil
 }

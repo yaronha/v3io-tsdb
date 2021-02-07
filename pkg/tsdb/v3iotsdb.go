@@ -24,17 +24,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	pathUtil "path"
+	"path/filepath"
+	"time"
+
 	"github.com/nuclio/logger"
 	"github.com/pkg/errors"
 	"github.com/v3io/v3io-go-http"
 	"github.com/v3io/v3io-tsdb/pkg/appender"
 	"github.com/v3io/v3io-tsdb/pkg/config"
 	"github.com/v3io/v3io-tsdb/pkg/partmgr"
+	"github.com/v3io/v3io-tsdb/pkg/pquerier"
 	"github.com/v3io/v3io-tsdb/pkg/querier"
 	"github.com/v3io/v3io-tsdb/pkg/tsdb/schema"
 	"github.com/v3io/v3io-tsdb/pkg/utils"
-	pathUtil "path"
-	"time"
 )
 
 type V3ioAdapter struct {
@@ -49,8 +53,7 @@ type V3ioAdapter struct {
 func CreateTSDB(v3iocfg *config.V3ioConfig, schema *config.Schema) error {
 
 	lgr, _ := utils.NewLogger(v3iocfg.LogLevel)
-	container, err := utils.CreateContainer(
-		lgr, v3iocfg.WebApiEndpoint, v3iocfg.Container, v3iocfg.Username, v3iocfg.Password, v3iocfg.Workers)
+	container, err := utils.CreateContainer(lgr, v3iocfg)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a data container.")
 	}
@@ -94,8 +97,7 @@ func NewV3ioAdapter(cfg *config.V3ioConfig, container *v3io.Container, logger lo
 	if container != nil {
 		newV3ioAdapter.container = container
 	} else {
-		newV3ioAdapter.container, err = utils.CreateContainer(newV3ioAdapter.logger,
-			cfg.WebApiEndpoint, cfg.Container, cfg.Username, cfg.Password, cfg.Workers)
+		newV3ioAdapter.container, err = utils.CreateContainer(newV3ioAdapter.logger, cfg)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to create V3IO data container")
 		}
@@ -193,16 +195,21 @@ func (a *V3ioAdapter) Querier(_ context.Context, mint, maxt int64) (*querier.V3i
 	return querier.NewV3ioQuerier(a.container, a.logger, mint, maxt, a.cfg, a.partitionMngr), nil
 }
 
+// Create a Querier interface, used for time-series queries
+func (a *V3ioAdapter) QuerierV2(_ context.Context) (*pquerier.V3ioQuerier, error) {
+	return pquerier.NewV3ioQuerier(a.container, a.logger, a.cfg, a.partitionMngr), nil
+}
+
 func (a *V3ioAdapter) DeleteDB(deleteAll bool, ignoreErrors bool, fromTime int64, toTime int64) error {
 	if deleteAll {
 		// Ignore time boundaries
 		fromTime = 0
-		toTime = time.Now().Unix() * 1000
+		toTime = math.MaxInt64
 	}
 
-	partitions := a.partitionMngr.PartsForRange(fromTime, toTime)
+	partitions := a.partitionMngr.PartsForRange(fromTime, toTime, false)
 	for _, part := range partitions {
-		a.logger.Info("Delete partition '%s'.", part.GetTablePath())
+		a.logger.Info("Deleting partition '%s'.", part.GetTablePath())
 		err := utils.DeleteTable(a.logger, a.container, part.GetTablePath(), "", a.cfg.QryWorkers)
 		if err != nil && !ignoreErrors {
 			return errors.Wrapf(err, "Failed to delete partition '%s'.", part.GetTablePath())
@@ -216,7 +223,7 @@ func (a *V3ioAdapter) DeleteDB(deleteAll bool, ignoreErrors bool, fromTime int64
 	a.partitionMngr.DeletePartitionsFromSchema(partitions)
 
 	if len(a.partitionMngr.GetPartitionsPaths()) == 0 {
-		path := a.cfg.TablePath + "/names/"
+		path := filepath.Join(a.cfg.TablePath, config.NamesDirectory)
 		a.logger.Info("Delete metric names at path '%s'.", path)
 		err := utils.DeleteTable(a.logger, a.container, path, "", a.cfg.QryWorkers)
 		if err != nil && !ignoreErrors {
